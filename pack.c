@@ -4,9 +4,7 @@
 #define _POSIX_SOURCE 1 /* For fileno(...). */
 #define _XOPEN_SOURCE  /* For S_IFMT and S_IFREG. */
 #include <stdio.h>
-#ifdef USE_DEBUG
-#  include <stdlib.h>  /* For exit(...) and abort(...) if needed. */
-#endif
+#include <stdlib.h>  /* For exit(...) and abort(...) if needed. */
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -47,7 +45,7 @@ struct node
 	struct node *sorth;  /* Pointer to next higher frequency node */
 } nodes[NNODES], *root, *leaves[256], sortstart, max;
 
-short used, depth, freqflag, sizeflag, stdoutflag;
+short used, depth, freqflag, sizeflag, stdoutflag, decompressflag;
 short tree[1024]; /* Stores tree in puttree; codes in gcode and encoding */
 char code[5];
 FILE * buf;
@@ -55,6 +53,96 @@ FILE * obuf;
 void gcode(short, struct node *);
 void sortcount(), formtree();
 short compress(), puttree();
+
+/* --- Decompression. */
+
+#define PACKED 017437 /* <US><US> - Unlikely value. 0x1f 0x1f.  */
+
+static void fatal_eof(void) {
+	fprintf(stderr, "fatal: EOF in old pack stream\n");
+	exit(4);
+}
+
+static int get_w(FILE *buf) {
+	register int c, d;
+	if ((c = getc(buf)) < 0) fatal_eof();
+	if ((d = getc(buf)) < 0) fatal_eof();
+	return d << 8 | c;
+}
+
+static int decompress(void) {  /* Decompress from buf to obuf. */
+	static short tree[1024];
+	register short tp, bit, word;
+	register short i, *t;
+	short keysize, hi, lo;
+	long size;
+#ifdef USE_DEBUG2
+	short *u;
+#endif
+
+	if (get_w(buf) != PACKED) {
+		fprintf(stderr, "fatal: old pack signature not found\n");
+		return 1;
+	}
+	hi = get_w(buf);
+	if (hi < 0 || hi > 040000) {
+		fprintf(stderr, "fatal: size as PDP-11 32-bit float not supported\n");
+		return 2;
+	}
+	lo = get_w(buf);
+	size = (long)hi << 16 | lo;
+	t = tree;
+	for (keysize = get_w(buf); keysize--; )
+	{
+		if ((i = getc(buf)) == 0377) {
+			*t++ = get_w(buf);
+		} else {
+			if (i < 0) fatal_eof();
+			*t++ = i;
+		}
+	}
+
+#ifdef USE_DEBUG2
+	for (u=tree; u<t; u++ ) fprintf(stderr, "debug2: %4d: %6d  <%3o> %c\n", u-tree, *u, *u&0377, *u);
+#endif
+
+	bit = tp = 0;
+	for (;;)
+	{
+		if (bit == 0)
+		{
+			word = get_w(buf);
+			bit = 16;
+		}
+#ifdef USE_DEBUG2
+		fprintf(stderr, "debug: bit: %c\n", (word & 0x8000U) ? '1' : '0');
+#endif
+		if (word & 0x8000U) {  /* This works no matter how large sizeof(word) is. */
+			tp += tree[tp + 1];
+		} else {
+			tp += tree[tp];
+		}
+		word <<= 1;  bit--;
+		if (tree[tp] == 0)
+		{
+			putc(tree[tp+1], obuf);
+			tp = 0;
+			if ((size -= 1) == 0) break;
+#ifdef USE_DEBUG
+			fprintf(stderr, "debug: size=%lu bit_count=%u\n", (long)size, bit);
+#endif
+		}
+	}
+	if (ferror(buf)) {
+		fprintf(stderr, "fatal: read error\n");
+		return 2;
+	}
+	if (ferror(obuf)) {
+		fprintf(stderr, "fatal: write error\n");
+		return 3;
+	}
+	return 0;
+}
 
 static void put_w(short x, FILE *outf) {
 	/* (PDP-11) little-endian word. */
@@ -79,6 +167,7 @@ short argc; char *argv[];
 	short j, k, sep, treesize, ncodes;
         struct stat status, ostat;
         int exit_code = 0;
+        int had_file = 0;
 
 	for (k=1; k<argc; k++)
 	{       if (argv[k][0] == '-' && argv[k][1] == '\0')  /* - flag: print statistics to stderr. */
@@ -93,14 +182,28 @@ short argc; char *argv[];
 		{       stdoutflag = 1 - stdoutflag;
 			continue;
 		}
+		if (argv[k][0] == '-' && argv[k][1] == 'd' && argv[k][2] == '\0')  /* -d flag: decompress instead of compress. */
+		{       decompressflag = 1 - decompressflag;
+			continue;
+		}
 
+		had_file = 1;
 		if (stdoutflag) {
 			if ((buf = fopen(argv[k], "r")) == NULL)
 			{       fprintf(stderr, "%s: Unable to open\n", argv[k]);
 				continue;
 			}
 			obuf = stdout;
+			if (decompressflag) {
+				if (decompress()) exit_code = 1;
+				fclose(buf);
+				continue;
+			}
 			goto obuf_ok;
+		}
+		if (decompressflag) {
+			fprintf(stderr, "%s: decompress (-d) needs stdout (-c)\n", argv[k]);
+			return 1;
 		}
 		sep = -1;  cp = filename;
 		for (i=0; i < (LNAME-3) && (*cp = argv[k][i]); i++)
@@ -246,6 +349,11 @@ short argc; char *argv[];
 #if 0
 		smdate( filename , status.modtime ); /* preserve modified time */
 #endif
+	}
+	if (decompressflag && !had_file) {
+		buf = stdin;
+		obuf = stdout;
+		exit_code = decompress();
 	}
 	return exit_code;
 }
