@@ -140,7 +140,9 @@ short argc; char *argv[];
 
 		formtree();
 		put_w(PACKED, obuf);
+#if 0  /* Not part of the original file format in Unix System III. */
 		put_w(root->freq, obuf);
+#endif
 		treesize = puttree();
 
 		depth = 0;  /* Reset for reuse by gcode */
