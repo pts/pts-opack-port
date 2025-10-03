@@ -4,6 +4,9 @@
 #define _POSIX_SOURCE 1 /* For fileno(...). */
 #define _XOPEN_SOURCE  /* For S_IFMT and S_IFREG. */
 #include <stdio.h>
+#ifdef USE_DEBUG
+#  include <stdlib.h>  /* For exit(...) and abort(...) if needed. */
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -144,9 +147,13 @@ short argc; char *argv[];
 
 		formtree();
 		put_w(PACKED, obuf);
-#if 0  /* Not part of the original file format in Unix System III. */
-		put_w(root->freq, obuf);
+#ifdef USE_DEBUG
+		fprintf(stderr, "debug: uncompressed size: root_freq=%lu\n", (unsigned long)root->freq);
 #endif
+		/* Unix System III expects the uncompressed size (root->freq) as a PDP-11 dword. */
+		/* PDP-11 middle-endian dword: https://en.wikipedia.org/wiki/Endianness#Middle-endian */
+		put_w(root->freq >> 16, obuf);
+		put_w(root->freq, obuf);
 		treesize = puttree();
 
 		depth = 0;  /* Reset for reuse by gcode */
@@ -299,7 +306,13 @@ short puttree()  /* Returns tree size (bytes) */
         FILE * b = obuf;
 	extra = depth = 0;
 	maketree(root);
+#ifdef USE_DEBUG
+	fprintf(stderr, "debug: depth=0x%x\n", depth);
+#endif
 	put_w(depth, b); /* Size of tree */
+#ifdef USE_DEBUG
+	if (0) exit(5);
+#endif
 
 	for (i = 0; i<depth; i++)
 	{       j = tree[i];
