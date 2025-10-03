@@ -133,6 +133,7 @@ static int decompress(void) {  /* Decompress from buf to obuf. */
 #endif
 		}
 	}
+#ifndef __MINILIBC686__
 	if (ferror(buf)) {
 		fprintf(stderr, "fatal: read error\n");
 		return 2;
@@ -141,6 +142,7 @@ static int decompress(void) {  /* Decompress from buf to obuf. */
 		fprintf(stderr, "fatal: write error\n");
 		return 3;
 	}
+#endif
 	return 0;
 }
 
@@ -244,8 +246,10 @@ short argc; char *argv[];
 			goto closein;
 		}
 
+#ifndef __MINILIBC686__
 		(void)!chmod(filename, status.st_mode);
 		(void)!chown(filename, status.st_uid, status.st_gid);
+#endif
 
 		obuf_ok:
 		errno = used = 0;
