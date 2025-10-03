@@ -47,7 +47,7 @@ struct node
 	struct node *sorth;  /* Pointer to next higher frequency node */
 } nodes[NNODES], *root, *leaves[256], sortstart, max;
 
-short used, depth, freqflag, sizeflag;
+short used, depth, freqflag, sizeflag, stdoutflag;
 short tree[1024]; /* Stores tree in puttree; codes in gcode and encoding */
 char code[5];
 FILE * buf;
@@ -78,66 +78,80 @@ short argc; char *argv[];
 	struct node *order[256];
 	short j, k, sep, treesize, ncodes;
         struct stat status, ostat;
+        int exit_code = 0;
 
 	for (k=1; k<argc; k++)
-	{       if (argv[k][0] == '-' && argv[k][1] == '\0')  /* - flag: print statistics to stdout */
+	{       if (argv[k][0] == '-' && argv[k][1] == '\0')  /* - flag: print statistics to stderr. */
 		{       freqflag = 1 - freqflag;
 			continue;
 		}
-		if (argv[k][0] == '-' && argv[k][1] == 's' && argv[k][2] == '\0')  /* -s flag: keep the compressed file no matter how large it is */
+		if (argv[k][0] == '-' && argv[k][1] == 's' && argv[k][2] == '\0')  /* -s flag: keep the compressed file no matter how large it is. */
 		{       sizeflag = 1 - sizeflag;
 			continue;
 		}
+		if (argv[k][0] == '-' && argv[k][1] == 'c' && argv[k][2] == '\0')  /* -c flag: write to stdout instead of a file. */
+		{       stdoutflag = 1 - stdoutflag;
+			continue;
+		}
 
+		if (stdoutflag) {
+			if ((buf = fopen(argv[k], "r")) == NULL)
+			{       fprintf(stderr, "%s: Unable to open\n", argv[k]);
+				continue;
+			}
+			obuf = stdout;
+			goto obuf_ok;
+		}
 		sep = -1;  cp = filename;
 		for (i=0; i < (LNAME-3) && (*cp = argv[k][i]); i++)
 			if (*cp++ == '/') sep = i;
 #ifdef	AGSM
 		if (cp[-1]==SUF1 && cp[-2]==SUF0)
-		{	printf ("%s: Already packed\n", filename);
+		{	fprintf(stderr, "%s: Already packed\n", filename);
 			continue;
 		}
 #endif
 		if (i >= (LNAME-3) || (i-sep) > 13)
-		{       printf ("%s: File name too long\n",argv[k]);
+		{       fprintf(stderr, "%s: File name too long\n",argv[k]);
 			continue;
 		}
 		if ((buf = fopen(filename, "r")) == NULL)
-		{       printf ("%s: Unable to open\n", argv[k]);
+		{       fprintf(stderr, "%s: Unable to open\n", argv[k]);
 			continue;
 		}
-
 		fstat(fileno(buf),&status);
 
 		if((status.st_mode & S_IFMT) != S_IFREG)
-		{	printf ("%s: Not a plain file\n",filename);
+		{	fprintf(stderr, "%s: Not a plain file\n",filename);
 			goto closein;
 		}
 		if( status.st_nlink != 1 )
-		{	printf("'%s' has links\n", filename);
+		{	fprintf(stderr, "'%s' has links\n", filename);
 			goto closein;
 		}
 
 		*cp++ = SUF0;  *cp++ = SUF1;  *cp = '\0';
 		if( stat(filename, &ostat) != -1)
 		{
-			printf("%s: Already exists\n", filename);
+			fprintf(stderr, "%s: Already exists\n", filename);
 			goto closein;
 		}
                   if ((obuf = fopen(filename, "w")) == NULL)
-		{       printf ("%s: Unable to create\n", argv[k]);
+		{       fprintf(stderr, "%s: Unable to create\n", argv[k]);
 			goto closein;
 		}
 
-		(void)!chmod(filename,status.st_mode);
+		(void)!chmod(filename, status.st_mode);
 		(void)!chown(filename, status.st_uid, status.st_gid);
+
+		obuf_ok:
 		errno = used = 0;
 		for (i = 256; i--; ) leaves[i] = 0;
 
 		sortcount();
 
 		if (used < 2)
-		{       printf ("%s: Trivial file\n", argv[k]);
+		{       fprintf(stderr, "%s: Trivial file\n", argv[k]);
 			goto forgetit;
 		}
 
@@ -162,29 +176,29 @@ short argc; char *argv[];
 		if (freqflag)  /* Output stats */
 		{
 #ifndef FLOATING_PACK
-			printf ("\n%s: %ld Bytes\n",argv[k],(long)root->freq);
+			fprintf(stderr, "\n%s: %ld Bytes\n",argv[k],(long)root->freq);
 #else
-			printf ("\n%s: %.0f Bytes\n",argv[k],root->freq);
+			fprintf(stderr, "\n%s: %.0f Bytes\n",argv[k],root->freq);
 #endif
 			for (i=ncodes; i--; )
 			{   n = order[i];
 #ifndef FLOATING_PACK
-			    printf ("%10ld%8ld%% <%3o> = <",
+			    fprintf(stderr, "%10ld%8ld%% <%3o> = <",
 			       (long)n->freq, (long)(100*n->freq/root->freq),
 #else
-			    printf ("%10.0f%8.3f%% <%3o> = <",
+			    fprintf(stderr, "%10.0f%8.3f%% <%3o> = <",
 			       n->freq, 100.*n->freq/root->freq,
 #endif
 			       n->olink.integ&0377);
 			    if (n->olink.integ<040 || n->olink.integ > 0177)
-			       printf (">   ");
+			       fprintf(stderr, ">   ");
 			    else
-			       printf ("%c>  ",n->olink.integ);
+			       fprintf(stderr, "%c>  ",n->olink.integ);
 			    cp = (char*)leaves[n->olink.integ];
 			    for (j=0; j < *cp; j++)
 			       putchar('0' +
 				  ((cp[1+(j>>3)] >> (7-(j&07)))&01));
-			    putchar('\n');
+			    putc('\n', stderr);
 			}
 		}
 
@@ -194,15 +208,15 @@ short argc; char *argv[];
                             *(unsigned char*)leaves[nodes[i].olink.integ];
 		nchars = (nchars + 7)/8 + treesize + 8;
 #ifndef	FLOATING_PACK
-		if (freqflag) printf ("%s: Packed size: %ld bytes\n",
+		if (freqflag) fprintf(stderr, "%s: Packed size: %ld bytes\n",
 			argv[k], (long)nchars);
 #else
-		if (freqflag) printf ("%s: Packed size: %.0f bytes\n",
+		if (freqflag) fprintf(stderr, "%s: Packed size: %.0f bytes\n",
 			argv[k], nchars);
 #endif
 		/* If compression won't save a block, forget it */
 		if (!sizeflag && (i = (nchars+511)/512) >= (j = (root->freq+511)/512))
-		{       printf ("%s: Not packed (no blocks saved)\n", argv[k]);
+		{       fprintf(stderr, "%s: Not packed (no blocks saved)\n", argv[k]);
 			goto forgetit;
 		}
 
@@ -210,29 +224,30 @@ short argc; char *argv[];
 
 		if (compress() == 0)
 		{
-			unlink(argv[k]);
+			if (!stdoutflag) unlink(argv[k]);
 #ifndef FLOATING_PACK
-			printf ("%s: %ld%% Compression\n", argv[k],
+			fprintf(stderr, "%s: %ld%% Compression\n", argv[k],
 				(long)(100*(root->freq - nchars)/root->freq));
 #else
-			printf ("%s: %.0f%% Compression\n", argv[k],
+			fprintf(stderr, "%s: %.0f%% Compression\n", argv[k],
 				100.*(root->freq - nchars)/root->freq);
 #endif
 		}
 		else
 		{
-			perror( filename );
-			printf ("%s: I/O Error - File unchanged\n", argv[k]);
-	forgetit:       unlink(filename);
+			if (!stdoutflag) perror( filename );
+			fprintf(stderr, "%s: I/O Error - File unchanged\n", argv[k]);
+	forgetit:       if (!stdoutflag) unlink(filename);
+			exit_code = 2;  /* Had error. */
 		}
 
-		fclose (obuf);
+		if (!stdoutflag) fclose(obuf);
      closein:	fclose (buf);
 #if 0
 		smdate( filename , status.modtime ); /* preserve modified time */
 #endif
 	}
-	return 0;
+	return exit_code;
 }
 
 void sortcount()
