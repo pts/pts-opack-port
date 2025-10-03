@@ -99,7 +99,7 @@ static int decompress(void) {  /* Decompress from buf to obuf. */
 
 	if (get_w(buf) != PACKED) {
 		fprintf(stderr, "fatal: old pack signature not found\n");
-		return 1;
+		return 6;
 	}
 	hi = get_w(buf);
 	if (hi < 0 || hi > 040000) {
@@ -150,6 +150,7 @@ static int decompress(void) {  /* Decompress from buf to obuf. */
 #endif
 		}
 	}
+	fflush(obuf);
 #ifndef __MINILIBC686__
 	if (ferror(buf)) {
 		fprintf(stderr, "fatal: read error\n");

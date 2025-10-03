@@ -50,28 +50,24 @@ static int get_w(FILE *buf) {
 	return d << 8 | c;
 }
 
-int main(int argc, char **argv) {
+static void decompress(FILE *buf, FILE *obuf) {
 	static short tree[1024];
 	register short tp, bit, word;
 	register short i, *t;
 	short keysize, hi, lo;
 	long size;
-	FILE *buf, *obuf;
 #ifdef USE_DEBUG2
 	short *u;
 #endif
-
-	(void)argc; (void)argv;
-	buf = stdin;
 	obuf = stdout;
 	if (get_w(buf) != PACKED) {
 		fprintf(stderr, "fatal: old pack signature not found\n");
-		return 1;
+		exit(6);
 	}
 	hi = get_w(buf);
 	if (hi < 0 || hi > 040000) {
 		fprintf(stderr, "fatal: size as PDP-11 32-bit float not supported\n");
-		return 2;
+		exit(2);
 	}
 	lo = get_w(buf);
 	size = (long)hi << 16 | lo;
@@ -117,13 +113,34 @@ int main(int argc, char **argv) {
 #endif
 		}
 	}
+	fflush(obuf);
+#ifndef __MINILIBC686__
 	if (ferror(buf)) {
 		fprintf(stderr, "fatal: read error\n");
-		return 2;
+		exit(2);
 	}
 	if (ferror(obuf)) {
 		fprintf(stderr, "fatal: write error\n");
-		return 3;
+		exit(3);
+	}
+#endif
+}
+
+int main(int argc, char **argv) {
+	FILE *buf;
+
+	(void)argc;
+	if (*a++rgv == NULL) {  /* No arguments, decompress from stdin. */
+		decompress(stdin, stdout);
+	} else {
+		for (; *argv != NULL; ++argv) {
+			if ((buf = fopen(*argv, "rb")) == NULL) {
+				fprintf(stderr, "fatal: error opening old packed file for reading: %s\n", *argv);
+				exit(4);
+			}
+			decompress(buf, stdout);
+			fclose(buf);
+		}
 	}
 	return 0;
 }
