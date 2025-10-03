@@ -44,7 +44,7 @@ struct node
 	struct node *sorth;  /* Pointer to next higher frequency node */
 } nodes[NNODES], *root, *leaves[256], sortstart, max;
 
-short used, depth, freqflag ;
+short used, depth, freqflag, sizeflag;
 short tree[1024]; /* Stores tree in puttree; codes in gcode and encoding */
 char code[5];
 FILE * buf;
@@ -77,8 +77,12 @@ short argc; char *argv[];
         struct stat status, ostat;
 
 	for (k=1; k<argc; k++)
-	{       if (argv[k][0] == '-' && argv[k][1] == '\0')
+	{       if (argv[k][0] == '-' && argv[k][1] == '\0')  /* - flag: print statistics to stdout */
 		{       freqflag = 1 - freqflag;
+			continue;
+		}
+		if (argv[k][0] == '-' && argv[k][1] == 's' && argv[k][2] == '\0')  /* -s flag: keep the compressed file no matter how large it is */
+		{       sizeflag = 1 - sizeflag;
 			continue;
 		}
 
@@ -190,7 +194,7 @@ short argc; char *argv[];
 			argv[k], nchars);
 #endif
 		/* If compression won't save a block, forget it */
-		if ((i = (nchars+511)/512) >= (j = (root->freq+511)/512))
+		if (!sizeflag && (i = (nchars+511)/512) >= (j = (root->freq+511)/512))
 		{       printf ("%s: Not packed (no blocks saved)\n", argv[k]);
 			goto forgetit;
 		}
