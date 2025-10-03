@@ -102,6 +102,7 @@ static int decompress(void) {  /* Decompress from buf to obuf. */
 		return 6;
 	}
 	hi = get_w(buf);
+	/* https://archive.org/download/bitsavers_decpdp11meoatingPointFormat_1047674/701110_The_PDP-11_Floating_Point_Format.pdf */
 	if (hi < 0 || hi > 040000) {
 		fprintf(stderr, "fatal: size as PDP-11 32-bit float not supported\n");
 		return 2;
