@@ -1,3 +1,8 @@
+/* gcc -s -O2 -W -Wall -Wextra -ansi -pedantic -o pack pack.c */
+/* gcc -fsanitize=address -g -O2 -W -Wall -Wextra -ansi -pedantic -o pack pack.c */
+
+#define _POSIX_SOURCE 1 /* For fileno(...). */
+#define _XOPEN_SOURCE  /* For S_IFMT and S_IFREG. */
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -48,12 +53,20 @@ void gcode(short, struct node *);
 void sortcount(), formtree();
 short compress(), puttree();
 
-short main(argc, argv)
+static void put_w(short x, FILE *outf) {
+	/* (PDP-11) little-endian word. */
+	putc(x, outf);
+	x >>= 8;
+	putc(x, outf);
+}
+
+int main(argc, argv)
 short argc; char *argv[];
+{
 #ifndef FLOATING_PACK
-{       long nchars; /* Bits, then chars in output file */
+	long nchars; /* Bits, then chars in output file */
 #else
-{       double nchars; /* Bits, then chars in output file */
+	double nchars; /* Bits, then chars in output file */
 #endif
 	register struct node *n;
 	register short i;
@@ -109,8 +122,8 @@ short argc; char *argv[];
 			goto closein;
 		}
 
-		chmod(filename,status.st_mode);
-		chown(filename, status.st_uid, status.st_gid);
+		(void)!chmod(filename,status.st_mode);
+		(void)!chown(filename, status.st_uid, status.st_gid);
 		errno = used = 0;
 		for (i = 256; i--; ) leaves[i] = 0;
 
@@ -126,24 +139,25 @@ short argc; char *argv[];
 			order[i] = n = n->sortl;
 
 		formtree();
-		putw(PACKED, obuf);
-		putw(root->freq, obuf);
+		put_w(PACKED, obuf);
+		put_w(root->freq, obuf);
 		treesize = puttree();
 
 		depth = 0;  /* Reset for reuse by gcode */
 		gcode(0,root); /* leaves[i] now points to code for i */
 
 		if (freqflag)  /* Output stats */
+		{
 #ifndef FLOATING_PACK
-		{       printf ("\n%s: %d Bytes\n",argv[k],root->freq);
+			printf ("\n%s: %ld Bytes\n",argv[k],(long)root->freq);
 #else
-		{       printf ("\n%s: %.0f Bytes\n",argv[k],root->freq);
+			printf ("\n%s: %.0f Bytes\n",argv[k],root->freq);
 #endif
 			for (i=ncodes; i--; )
 			{   n = order[i];
 #ifndef FLOATING_PACK
-			    printf ("%10d%8d%% <%3o> = <",
-			       n->freq, 100*n->freq/root->freq,
+			    printf ("%10ld%8ld%% <%3o> = <",
+			       (long)n->freq, (long)(100*n->freq/root->freq),
 #else
 			    printf ("%10.0f%8.3f%% <%3o> = <",
 			       n->freq, 100.*n->freq/root->freq,
@@ -153,7 +167,7 @@ short argc; char *argv[];
 			       printf (">   ");
 			    else
 			       printf ("%c>  ",n->olink.integ);
-			    cp = leaves[n->olink.integ];
+			    cp = (char*)leaves[n->olink.integ];
 			    for (j=0; j < *cp; j++)
 			       putchar('0' +
 				  ((cp[1+(j>>3)] >> (7-(j&07)))&01));
@@ -167,11 +181,12 @@ short argc; char *argv[];
                             *(unsigned char*)leaves[nodes[i].olink.integ];
 		nchars = (nchars + 7)/8 + treesize + 8;
 #ifndef	FLOATING_PACK
-		if (freqflag) printf ("%s: Packed size: %d bytes\n",
+		if (freqflag) printf ("%s: Packed size: %ld bytes\n",
+			argv[k], (long)nchars);
 #else
 		if (freqflag) printf ("%s: Packed size: %.0f bytes\n",
-#endif
 			argv[k], nchars);
+#endif
 		/* If compression won't save a block, forget it */
 		if ((i = (nchars+511)/512) >= (j = (root->freq+511)/512))
 		{       printf ("%s: Not packed (no blocks saved)\n", argv[k]);
@@ -184,8 +199,8 @@ short argc; char *argv[];
 		{
 			unlink(argv[k]);
 #ifndef FLOATING_PACK
-			printf ("%s: %d%% Compression\n", argv[k],
-				100*(root->freq - nchars)/root->freq);
+			printf ("%s: %ld%% Compression\n", argv[k],
+				(long)(100*(root->freq - nchars)/root->freq));
 #else
 			printf ("%s: %.0f%% Compression\n", argv[k],
 				100.*(root->freq - nchars)/root->freq);
@@ -198,10 +213,13 @@ short argc; char *argv[];
 	forgetit:       unlink(filename);
 		}
 
-   closeboth:	fclose (obuf);
+		fclose (obuf);
      closein:	fclose (buf);
-//		smdate( filename , status.modtime ); /* preserve modified time */
+#if 0
+		smdate( filename , status.modtime ); /* preserve modified time */
+#endif
 	}
+	return 0;
 }
 
 void sortcount()
@@ -267,13 +285,15 @@ void formtree()      /* Form Huffman code tree */
 	root = p;
 }
 
+int maketree(struct node *no);
+
 short puttree()  /* Returns tree size (bytes) */
 {       register short i,j;
 	short extra; /* full words in tree */
         FILE * b = obuf;
 	extra = depth = 0;
 	maketree(root);
-	putw(depth, b); /* Size of tree */
+	put_w(depth, b); /* Size of tree */
 
 	for (i = 0; i<depth; i++)
 	{       j = tree[i];
@@ -281,14 +301,14 @@ short puttree()  /* Returns tree size (bytes) */
 			putc(j,b);
 		else
 		{       putc(0377,b);
-			putw(j,b);
+			put_w(j,b);
 			extra++;
 		}
 	}
 	return (depth + extra*2);
 }
 
-maketree(no)
+int maketree(no)
 struct node *no;
 {       register short d;
 	register struct node *n;
@@ -307,9 +327,8 @@ struct node *no;
 	return(d);
 }
 
-void gcode(len,nod)  /* Recursive routine to compute code table */
-short len;  /* code length at time of call */
-struct node *nod;
+void gcode(short len, struct node *nod)  /* Recursive routine to compute code table */
+/* len is code length at time of call */
 {       register struct node *n;
 	register short l, bit;
 	short i;
@@ -320,7 +339,7 @@ struct node *nod;
 	if (n->zlink == 0)
 	{       /* Terminal.  Copy #bits and code, set pointer in leaves */
 		/* Treat tree as char array */
-                leaves[n->olink.integ] = t = &((char*)tree)[depth];
+                leaves[n->olink.integ] = (struct node*)(t = &((char*)tree)[depth]);
 		*t++ = l;
 		depth++;
 		u = code;
@@ -343,9 +362,9 @@ short compress() /* Here's the time consumer */
 	short c;
 	char *p;
 
-	bits = 0;
+	bits = word = 0;
 	while ((i = getc(buf)) >= 0)
-	{       p = leaves[i];
+	{       p = (char*)leaves[i];
 		c = *p++ & 0377;
 		for (i=0; i<c; i++) /* Output c bits */
 		{       word <<= 1;
@@ -354,13 +373,13 @@ short compress() /* Here's the time consumer */
 			++bits;
 			if ((bits &= 017) == 0)
 			{
-				putw(word, obuf);
+				put_w(word, obuf);
 				if ( errno )
 					return( 1 );
 			}
 		}
 	}
-	if (bits) putw(word << (16-bits), obuf);
+	if (bits) put_w(word << (16-bits), obuf);
 	fflush(obuf);
 	return( errno );
 }
